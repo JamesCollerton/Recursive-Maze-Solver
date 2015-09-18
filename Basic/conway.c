@@ -1,0 +1,693 @@
+/*
+
+Conway's Soldiers
+Week 10
+James Collerton: 46114
+
+I fixed the malloc/ free problem! All mallocs are freed now.
+
+This functions as in the brief. Players can enter their coordinates in x, y style starting at 1 and can enter coordinates where there are already
+pegs, but the program will warn them.
+
+It has an initial board, looks for moves from it and then adds them onto the end of the list. A couple of things worth mentioning are 
+that it links from a board to the board before it, rather than from a board to the next one in the list. Also the board is calculated
+upside down and then reversed at the end. This makes dimensions a bit more intuitive to think about (rows go up and when the user enters 
+his coordinates they work in an x, y fashion) and the dimensions start at one rather than zero. 
+
+Once a solution has been calculated please skip through through it using any key.
+
+Also, the neillsdl headers have been altered so please use those in conjunction with the makefile.
+
+*/
+
+// 														PREPROCESSING
+
+#include<stdio.h>
+#include<stdlib.h>
+#include<time.h>
+#include "neillsdl2.h"
+
+#define BOARD_W 9							//Note that an extra two has been added to the width and height to create a border.
+#define BOARD_H 10
+#define BOARD_H_NO_BORDER 8 						//Dimensions as specified in the brief.
+#define BOARD_W_NO_BORDER 7
+#define BORDER 1 							//Used in some loops and similar to deal with the border.
+#define NUM_CLEARS 100							//The number of unique boards generated before printing a message. 
+#define SCALE_FACT 100							//Scaling factor for the SDL work.
+#define RECT_SIZE 80							//Used to define rectangle components for the SDL.
+#define MIN_ROW 1 							//To make sure the user doesn't enter invalid coordinates.
+#define MIN_COL 1
+#define SUCCESS 0 							//Used to make sure functions return successful values.
+
+// 														TYPEDEFS AND ENUMERATIONS
+
+enum space_types {border = '.', space = ' ', peg = 'x'};
+typedef enum space_types space_types;
+
+enum yes_no {yes, no};
+typedef enum yes_no yes_no;
+
+enum success_failure {successful, unsuccessful};
+typedef enum success_failure success_failure;
+
+enum contained_indicator {unseen, seen_before};
+typedef enum contained_indicator contained_indicator;
+
+enum on_off {off, on};
+typedef enum on_off on_off;
+
+//Uint 8 colour codes.
+enum colours {white = 255, green_one = 100, green_two = 200, green_three = 10, red_one = 200, black = 0, red_three = 20};
+typedef enum colours colours;
+
+typedef space_types board[BOARD_H][BOARD_W];
+
+struct board_struct{
+	board board_array;
+	struct board_struct *parent_board;
+	struct board_struct *last_board;
+	struct board_struct *solution_board;
+	yes_no all_moves_made;
+};
+typedef struct board_struct board_struct;
+
+struct colour_struct{
+	Uint8 colour_r; 
+	Uint8 colour_g; 
+	Uint8 colour_b;
+};
+typedef struct colour_struct colour_struct;
+
+// 																FUNCTIONS
+
+void check_input_arguments(int argc, char *argv[], int *row_coordinate, int *col_coordinate, success_failure *success_index);
+
+void clear_screen(void);
+
+void check_row_col_coordinates(int *row_coordinate, int *col_coordinate, char *argv[], success_failure *success_index);
+
+void initialise_player_board(board_struct *player_board);
+
+board_struct *make_a_move(int row_coordinate, int col_coordinate, board_struct *player_board, board_struct *current_board, success_failure *success_index);
+
+board_struct *search_for_fresh_board(board_struct *current_board);
+
+board_struct *check_board_contents(board_struct *current_board, board_struct *player_board, success_failure *success_index,
+				   int row_coordinate, int col_coordinate);
+
+board_struct *attempt_to_move(board_struct *parent_board, board_struct *current_board, success_failure *success_index, int row, int col,
+			      int row_coordinate, int col_coordinate, int row_incr, int col_incr);
+
+board_struct *create_new_board_struct(void);
+
+void copy_in_parent_board(board_struct *new_board, board_struct *parent_board);
+
+void generate_board(board_struct *new_board, board_struct *parent_board, board_struct *current_board, int row, int col, int row_incr, int col_incr);
+
+void check_for_success(board_struct *new_board, int row_coordinate, int col_coordinate, success_failure *success_index);
+
+void link_successful_boards(board_struct *new_board);
+
+void print_messages(success_failure *success_index);
+
+contained_indicator check_in_list(board_struct *new_board, board_struct *current_board);
+
+void check_lists(board_struct *current_board);
+
+void print_time_taken(clock_t start);
+
+void print_successful_boards(board_struct *current_board, SDL_Simplewin *sw, int row_coordinate, int col_coordinate);
+
+void print_board_SDL(board_struct *current_board, SDL_Simplewin *sw, on_off intermediate_indicator, int row_coordinate, int col_coordinate);
+
+void colour_chooser(board_struct *current_board, int i, int j, colour_struct *colour_range, on_off intermediate_index, int row_coordinate, int col_coordinate);
+
+void colour_setter(colour_struct *colour_range, colours r, colours g, colours b);
+
+void free_all_boards(board_struct *current_board);
+
+
+
+//																MAIN
+
+//Does error checking on all of the command line arguments. Initialises the first board for the game including a border. 
+//The border is so that the algorithm can look outside of the player's board part of the array and not access junk. 
+//Then if the user has not given the game some coordinates that are already inhabited by pegs the game looks to find a 
+//way of reaching the coordinates. Finally it prints off the solution boards and frees the memory.
+
+int main(int argc, char *argv[])
+{
+	board_struct player_board;
+	board_struct *final_board = NULL;
+	success_failure success_index = unsuccessful;
+	int row_coordinate, col_coordinate;
+	clock_t start = clock();
+
+	SDL_Simplewin sw;
+
+	check_input_arguments(argc, argv, &row_coordinate, &col_coordinate, &success_index);
+
+	initialise_player_board(&player_board);
+
+	if(success_index != successful){
+		final_board = make_a_move(row_coordinate, col_coordinate, &player_board, &player_board, &success_index);
+	}
+	else{
+		final_board = &player_board;
+	}
+
+	print_time_taken(start);
+
+	Neill_SDL_Init(&sw);
+
+	if(success_index == successful){
+		print_successful_boards(&player_board, &sw, row_coordinate, col_coordinate);
+	}
+
+	free_all_boards(final_board);
+
+	atexit(SDL_Quit);
+
+	return(0);
+}
+
+
+
+// 														FUNCTION DEFINITIONS
+
+//Checks to make sure the right number of input arguments have been entered.
+
+void check_input_arguments(int argc, char *argv[], int *row_coordinate, int *col_coordinate, success_failure *success_index)
+{
+	//We need three arguments, the executable and two dimensions.
+	if(argc == 1 || argc == 2){
+		clear_screen();
+		fprintf(stderr, "\nNot enough input arguments! Please try again.\n\n");
+		exit(1);
+	}
+	if(argc == 3){
+
+		check_row_col_coordinates(row_coordinate, col_coordinate, argv, success_index);
+
+	}
+	//Any more than three is too many and the user must be warned and the program quit.
+	if(argc > 3){
+		clear_screen();
+		fprintf(stderr, "\nToo many arguments! Please try again.\n\n");
+		exit(1);
+	}
+}
+
+//Wrapper for clearing the screen.
+
+void clear_screen(void)
+{
+	int clear_checker;
+
+	clear_checker = system("clear");
+
+	if(clear_checker != SUCCESS){
+		fprintf(stderr, "\nThere was a problem clearing the screen.\n\n");
+		exit(1);
+	}
+}
+
+//Scans the inputted arguments for integers and makes sure that what has been given to the function is sensible.
+//Will still let you enter coordinates where there are pieces but will immediately warn you and print the result.
+//I have let floats be scanned but they are rounded down to the nearest integer.
+
+void check_row_col_coordinates(int *row_coordinate, int *col_coordinate, char *argv[], success_failure *success_index)
+{
+	int scan_checker_one, scan_checker_two;
+
+	scan_checker_one = sscanf(argv[1], "%d", col_coordinate);
+	scan_checker_two = sscanf(argv[2], "%d", row_coordinate);
+
+	if(scan_checker_one == 0 || scan_checker_two == 0){
+		clear_screen();
+		fprintf(stderr, "\nYour arguments did not contain integers! Please try again.\n\n");
+		exit(1);
+	}
+
+	if(*row_coordinate < MIN_ROW || *row_coordinate > BOARD_H_NO_BORDER || *col_coordinate < MIN_COL || *col_coordinate > BOARD_W_NO_BORDER){
+		clear_screen();
+		fprintf(stderr, "\nInvalid peg coordinates! Please try again.\n\n");
+		exit(1);
+	}
+
+	clear_screen();
+	printf("\nYour chosen coordinates are: (%d, %d)\n", *col_coordinate, *row_coordinate);
+
+	//Anything up to the halfway point is already full of pegs (hence / 2).
+	if( (MIN_ROW <= *row_coordinate && *row_coordinate <= BOARD_H_NO_BORDER / 2) ){
+		printf("\n\nWe started at these coordinates!\n\n");
+		*success_index = successful;
+	}
+
+}
+
+//Used to initialise the board structure as handed to the function. Puts pegs in the upper part
+//spaces in the bottom part and a border around the edge.
+
+void initialise_player_board(board_struct *player_board)
+{
+	int i, j;
+
+	for(i = 0; i < BOARD_H; i++){
+		for(j = 0; j < BOARD_W; j++){
+			if(i == 0 || j == 0 || i == BOARD_H - BORDER || j == BOARD_W - BORDER){
+				player_board->board_array[i][j] = border;
+			}
+			else if(i < BOARD_H / 2){
+				player_board->board_array[i][j] = peg;
+			}
+			else{
+				player_board->board_array[i][j] = space;
+			}
+		}
+	}
+
+	player_board->last_board = NULL;
+	player_board->parent_board = NULL;
+	player_board->solution_board = NULL;
+	player_board->all_moves_made = no;
+
+}
+
+//Used when we know that the maze still hasn't been solved yet. It checks the board contents to see if any moves can be made
+//passing back the last element in the linked list structure we're creating to be used in the next iteration. Then it
+//searches for a fresh board to start making moves from. After it has done the search it checks to see if we have succeeded having
+//looked at the previous board, if so prints a message. If the uninvestigated board is NULL then we have investigated all boards
+//and still not found a solution. Otherwise we continue to search.
+
+board_struct *make_a_move(int row_coordinate, int col_coordinate, board_struct *player_board, board_struct *current_board, success_failure *success_index)
+{
+
+	board_struct *uninvestigated_board;
+
+	current_board = check_board_contents(current_board, player_board, success_index, row_coordinate, col_coordinate);
+
+	uninvestigated_board = search_for_fresh_board(current_board);
+
+	if(*success_index == successful){
+		printf("\n\nWe found it!\n\n");
+	}
+	else if(uninvestigated_board == NULL){
+		clear_screen();
+		printf("\n\nWe couldn't do it... I'm sorry!\n\n");
+	}
+	else{
+		current_board = make_a_move(row_coordinate, col_coordinate, uninvestigated_board, current_board, success_index);
+	}
+
+	return(current_board);
+
+}
+
+//This scans back through all of the boards and looks for the first board where the board that comes BEFORE it in the queue
+//has had all the moves made off it checked and that board has not. If this is true then this is the board that was created
+//earliest that has not had all of its possible moves checked. When there comes a point where this has not happened and the
+//board before the one we are examining is empty then we have examined all possible moves.
+
+board_struct *search_for_fresh_board(board_struct *current_board)
+{
+	if(current_board->last_board != NULL){
+		if(current_board->last_board->all_moves_made == yes && current_board->all_moves_made == no){
+			return(current_board);
+		}
+		else{
+			return(search_for_fresh_board(current_board->last_board));
+		}
+	}
+	else{
+		return(NULL);
+	}
+}
+
+//This attempts to move pegs down, up, left and right around the board. If it detects that we have found the solution earlier
+//it skips everything in the for loops and moves on. Once it has gone through and done all of the possible moves it signals 
+//this in the board structure and returns the current board so more boards can be added to the end of the list.
+
+board_struct *check_board_contents(board_struct *current_board, board_struct *player_board, success_failure *success_index,
+								   int row_coordinate, int col_coordinate)
+{
+	int i, j;
+
+	for(i = BORDER; i < BOARD_H; ++i){
+		for(j = BORDER; j < BOARD_W; ++j){
+			if(player_board->board_array[i][j] == peg && success_index != successful){
+
+				//Move down (note the last two arguments are increments added to the row and col coordinates).
+				current_board = attempt_to_move(player_board, current_board, success_index, row_coordinate, col_coordinate, i, j, 1, 0);
+
+				//Move up.
+				current_board = attempt_to_move(player_board, current_board, success_index, row_coordinate, col_coordinate, i, j, -1, 0);
+
+				//Move left.
+				current_board = attempt_to_move(player_board, current_board, success_index, row_coordinate, col_coordinate, i, j, 0, -1);
+
+				//Move right.
+				current_board = attempt_to_move(player_board, current_board, success_index, row_coordinate, col_coordinate, i, j, 0, 1);
+			}
+		}
+	}
+
+	player_board->all_moves_made = yes;
+
+	return(current_board);
+}
+
+//This was just a nice way of trying all the different move combinations. 'Increments' are passed into the function and added
+//onto the current row and column to look for moves. If a move is possible then it generates the board and checks to see if that
+//is the successful board. Finally it checks if that board is already in the list, if it is then the board is discarded, otherwise 
+//it is added onto the list as well.
+
+board_struct *attempt_to_move(board_struct *parent_board, board_struct *current_board, success_failure *success_index, int row_coordinate, 
+							  int col_coordinate, int row, int col, int row_incr, int col_incr)
+{
+
+	board_struct *new_board;
+
+	//Multiplied by 2 as the space two away in the relevant direction must be empty in order to move a peg in.
+	if(parent_board->board_array[row + row_incr][col + col_incr] == peg && 
+	   parent_board->board_array[row + 2 * row_incr][col + 2 * col_incr] == space){
+
+	   	new_board = create_new_board_struct();
+
+		copy_in_parent_board(new_board, parent_board);
+
+		generate_board(new_board, parent_board, current_board, row, col, row_incr, col_incr);
+
+		check_for_success(new_board, row_coordinate, col_coordinate, success_index);
+
+		if( !( check_in_list(new_board, current_board) ) ){
+
+			print_messages(success_index);
+
+			return(new_board);
+
+		}
+		else{
+
+			free(new_board);
+
+			return(current_board);
+
+		}
+
+	}
+
+	return(current_board);
+
+}
+
+//Used to allocate memory for the new board structure and to set up all the components of the structure.
+
+board_struct *create_new_board_struct(void)
+{
+	board_struct *temp;
+
+	temp = (board_struct *)malloc(sizeof(board_struct));
+
+	if(temp == NULL){
+		clear_screen();
+		fprintf(stderr, "\n\nCannot allocate new board structure.\n\n");
+		exit(1);
+	}
+
+	temp->parent_board = NULL;
+	temp->last_board = NULL;
+	temp->solution_board = NULL;
+	temp->all_moves_made = no;
+
+	return(temp);
+}
+
+//This copies in the parent board to the prospective new board for moves to be made.
+
+void copy_in_parent_board(board_struct *new_board, board_struct *parent_board)
+{
+	int i, j;
+
+	for(i = 0; i < BOARD_H; ++i){
+		for(j = 0; j < BOARD_W; ++j){
+
+			new_board->board_array[i][j] = parent_board->board_array[i][j];
+
+		}
+	}
+
+}
+
+//This is used to actually make the move and change what has occurred on the board.
+
+void generate_board(board_struct *new_board, board_struct *parent_board, board_struct *current_board, int row, int col, int row_incr, 
+					int col_incr)
+{
+
+	//Multiplied by 2 as the space two away in the relevant direction must be empty in order to move a peg in.
+	new_board->board_array[row][col] = space;
+	new_board->board_array[row + row_incr][col + col_incr] = space;
+	new_board->board_array[row + 2 * row_incr][col + 2 * col_incr] = peg;
+
+	new_board->parent_board = parent_board;
+	new_board->last_board = current_board;
+	new_board->all_moves_made = no;
+	new_board->solution_board = NULL;
+
+}
+
+//Checks to see if the current board has a peg at the solution space.
+
+void check_for_success(board_struct *new_board, int row_coordinate, int col_coordinate, success_failure *success_index)
+{
+	if(new_board->board_array[row_coordinate][col_coordinate] == peg){
+		*success_index = successful;
+		link_successful_boards(new_board);
+	}
+}
+
+//If there has been a success then we go back up all of the parent boards and link them forward to create a
+//linked list containing the solution.
+
+void link_successful_boards(board_struct *successful_board)
+{
+	if(successful_board->parent_board != NULL){
+		successful_board->parent_board->solution_board = successful_board;
+		link_successful_boards(successful_board->parent_board);
+	}
+}
+
+//Used to print messages to the screen so the user knows that something is happening and the program
+//hasn't crashed. It only prints out every 100 boards or on the final board so that too much printing
+//is avoided. The first successful pass clause is because even after we have found the successful board
+//the algorithm will still try and move the peg it is on up/down/ left/ right one more time before stopping
+//and this prevents those messages being printed.
+
+void print_messages(success_failure *success_index)
+{
+	static int counter = 1;
+	static on_off first_successful_pass = off;
+
+	if( (counter % NUM_CLEARS == 0 || *success_index == successful) && first_successful_pass == off){
+
+		clear_screen();
+
+		printf("\n\nCurrently on unique board: %d", counter);
+
+		if(first_successful_pass == off && *success_index == successful){
+			first_successful_pass = on;
+		}
+
+	}
+	
+	++counter;
+
+}
+
+//This is used to check if the newly generated board has been seen previously. It assumes it has been seen before,
+//then lays down a marker if there is a difference between the new board and the one currently under consideration.
+//If this marker is detected then the next board is examined, this continues until we get a board we have seen before
+//or we get to the last board.
+
+contained_indicator check_in_list(board_struct *new_board, board_struct *current_board)
+{
+	int i, j;
+	contained_indicator indicator = seen_before;
+
+	if(current_board != NULL){
+		for(i = 0; i < BOARD_H; ++i){
+			for(j = 0; j < BOARD_W; ++j){
+				if(new_board->board_array[i][j] != current_board->board_array[i][j]){
+
+					indicator = unseen;
+
+				}
+			}
+		}
+	}
+
+	if(indicator == unseen && current_board->last_board != NULL){
+		indicator = check_in_list(new_board, current_board->last_board);
+	}
+
+	return(indicator);
+}
+
+//Used to print the time taken to find the solution.
+
+void print_time_taken(clock_t start)
+{
+	clock_t diff;
+	int msec;
+
+	//1000 as there are 1000 ms in a s.
+	diff = clock() - start;
+	msec = diff * 1000 / CLOCKS_PER_SEC;
+	printf("\nTime taken: %d seconds %d milliseconds\n\n", msec/1000, msec%1000);
+}
+
+//This is used to print the successful boards using the solution pointers. It prints two boards per movement,
+//one showing the movement and one showing the position afterwards. The counter is so that the first move isn't
+//considered as if it has come from a previous one.
+
+void print_successful_boards(board_struct *current_board, SDL_Simplewin *sw, int row_coordinate, int col_coordinate)
+{
+	static int counter = 0;
+
+	if(current_board != NULL && sw->finished != 1){
+
+		if(counter++ != 0){
+			print_board_SDL(current_board, sw, off, row_coordinate, col_coordinate);
+		}
+
+		print_board_SDL(current_board, sw, on, row_coordinate, col_coordinate);
+		print_successful_boards(current_board->solution_board, sw, row_coordinate, col_coordinate);
+	}
+}
+
+//This is used to print the boards through SDL. In terms of printing the brief specified that the bottom row should be
+//full of pegs and so I have flipped my version so when it prints in SDL it does it like that. The merit of working the
+//other way round is that the input coordinate system is a lot more intuitive.
+
+void print_board_SDL(board_struct *current_board, SDL_Simplewin *sw, on_off intermediate_indicator, int row_coordinate, int col_coordinate)
+{
+	int i, j, temp;
+	SDL_Rect rectangle;
+	colour_struct colour_range;
+
+   	rectangle.w = RECT_SIZE;
+   	rectangle.h = RECT_SIZE;
+
+   	sw->skip_checker = off;
+
+   	for(i = 0; i < BOARD_H; ++i){
+   		for(j = 0; j < BOARD_W; ++j){
+
+   			temp = BOARD_H - BORDER - i;											//To flip the board.
+
+   			rectangle.y = temp * SCALE_FACT + (WHEIGHT - SCALE_FACT * BOARD_H) / 2;						//For centering.
+   			rectangle.x = j * SCALE_FACT + (WWIDTH - SCALE_FACT * BOARD_W) / 2;
+
+   			colour_chooser(current_board, i, j, &colour_range, intermediate_indicator, row_coordinate, col_coordinate);
+   			Neill_SDL_SetDrawColour(sw, colour_range.colour_r, colour_range.colour_g, colour_range.colour_b);
+
+   			SDL_RenderFillRect(sw->renderer, &rectangle);
+
+   		}
+   	}
+
+   	SDL_RenderPresent(sw->renderer);
+	SDL_UpdateWindowSurface(sw->win);
+	    
+	do{
+	    Neill_SDL_Events(sw);
+	}while(sw->skip_checker != on);
+
+}
+
+//This chooses colours depending on whether we are showing a move or showing a board state.
+//Looks a little long but it essentially just cycles through all of the possibilities and assigns a
+//different colour dependent. The benefit of having the last three arguments not contained in a
+//structure is that it allows the flexibility to easily create new colours.
+
+void colour_chooser(board_struct *current_board, int i, int j, colour_struct *colour_range, on_off intermediate_index, int row_coordinate, int col_coordinate)
+{
+	if(intermediate_index == off){
+
+		//Pegs that have moved to a new space are shown in green.
+		if(current_board->board_array[i][j] == peg &&
+	   	   current_board->parent_board != NULL &&
+	   	   current_board->parent_board->board_array[i][j] == space){
+
+	   	   		colour_setter(colour_range, green_one, green_two, green_three);
+
+	   	}
+	   	//Unmoved pegs are shown in white.
+	   	else if(current_board->board_array[i][j] == peg){
+
+	   			colour_setter(colour_range, white, white, white);
+
+	   	}
+	   	//Pegs that have moved or been taken off are shown in red.
+	   	else if(current_board->board_array[i][j] == space &&
+	   			current_board->parent_board != NULL &&
+	   			current_board->parent_board->board_array[i][j] == peg ){
+
+	   			colour_setter(colour_range, red_one, black, red_three);
+
+	   	}
+	   	else{
+
+	   			colour_setter(colour_range, black, black, black);
+
+	   	}
+	}
+	else{
+
+		//The peg in the correct position is shown in purple.
+		if(current_board->board_array[i][j] == peg){
+			if(i == row_coordinate && j == col_coordinate){
+
+				colour_setter(colour_range, red_one, green_one, white);
+
+			}
+			//Other pegs in this intermediate stage are shown in white.
+			else{
+
+				colour_setter(colour_range, white, white, white);
+
+			}
+
+   		}
+   		else{
+
+   			colour_setter(colour_range, black, black, black);
+
+   		}
+	}
+}
+
+//Small wrapper for setting colours depending on what their type is.
+
+void colour_setter(colour_struct *colour_range, colours r, colours g, colours b)
+{
+	colour_range->colour_r = r;
+	colour_range->colour_g = g;
+	colour_range->colour_b = b;
+}
+
+//The final thing that the program does is to free all the board structures. Note the last
+//board doesn't need to be freed as it wasn't malloced.
+
+void free_all_boards(board_struct *current_board)
+{
+	board_struct *temp;
+
+	while(current_board->last_board != NULL && current_board != NULL){
+		temp = current_board->last_board;
+		free(current_board);
+		current_board = temp;
+	}
+
+}
