@@ -1,8 +1,8 @@
 #include <SDL.h>
 #include <math.h>
 
-#define WWIDTH 1000
-#define WHEIGHT 1000
+#define WWIDTH 525
+#define WHEIGHT 550
 
 #define SDL_8BITCOLOUR 256
 
@@ -15,7 +15,6 @@ struct SDL_Simplewin {
    SDL_bool finished;
    SDL_Window *win;
    SDL_Renderer *renderer;
-   int skip_checker;
 };
 typedef struct SDL_Simplewin SDL_Simplewin;
 
